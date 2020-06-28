@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Color Picker</title>
+        <meta charset='UTF-8'>
+        <script src='https://rawcdn.githack.com/NC22/HTML5-Color-Picker/fd2cdd0e6ac8843b26e62e2152df091ee9542cb8/html5kellycolorpicker.min.js'></script>
+        <style>
+            .button { background-color: #195B6A; border: none; color: white; padding: 16px 40px;text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
+            html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}
+            .colorPicker { padding-top: 20px; }
+        </style>
+       
+    </head>
+    <body>  
+        <div class='colorPicker'>
+            <canvas id='picker'></canvas>
+            <br>
+            <input id='color' value='#54aedb' name='colorPicker'>
+        </div>
+        <script>
+            const url = location.hostname;
+            const websocketPort = 81;
+            const connection = new WebSocket(`ws://${url}:${websocketPort}`, ['arduino']);    
+
+            connection.onopen = function () {
+              connection.send('Connect ' + new Date());
+            };    
+
+            connection.onerror = function (error) {
+              console.log('WebSocket Error ', error);
+            };
+            connection.onmessage = function (e) {
+              console.log('Server: ', e.data);
+            };
+            connection.onclose = function () {
+              console.log('WebSocket connection closed');
+            };
+
+            var picker = new KellyColorPicker({
+                place : 'picker',
+                input : 'color',
+                size : 150,
+                userEvents : { 
+                    change : function(self) {
+                        connection.send(self.getCurColorHex());
+                        }  
+                    }
+                });
+        </script>   
+    </body>
+</html>
