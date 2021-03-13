@@ -3,29 +3,47 @@
     <head>
         <title>Color Picker</title>
         <meta charset='UTF-8'>
-        <script src='https://rawcdn.githack.com/NC22/HTML5-Color-Picker/fd2cdd0e6ac8843b26e62e2152df091ee9542cb8/html5kellycolorpicker.min.js'></script>
+        <script src='https://rawcdn.githack.com/NC22/HTML5-Color-Picker/fd2cdd0e6ac8843b26e62e2152df091ee9542cb8/html5kellycolorpicker.min.js' defer></script>
         <style>
-            .button { background-color: #195B6A; border: none; color: white; padding: 16px 40px;text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
-            html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}
-            .colorPicker { padding-top: 20px; }
+            html {font-family:Helvetica;display:inline-block;margin:0px auto;text-align:center;}
+            .colorPicker {position:absolute;top:10%;margin:auto;width:100vw;}
+            .controls {display:flex;align-items:center;justify-content:center;}
+            .radio {flex-direction: column;align-items: center;}
         </style>
-       
     </head>
     <body>  
         <div class='colorPicker'>
             <canvas id='picker'></canvas>
             <br>
             <input id='color' value='#54aedb' name='colorPicker'>
+            <br>
+            <br>
+            <div class="controls">
+              <label class="radio">
+                <input checked type="radio" name="colorMode" value="STATIC">
+                Static
+              </label>
+              <label class="radio">
+                <input type="radio" name="colorMode" value="RAINBOW">
+                Rainbow
+              </label>
+              <label class="radio">
+                <input type="radio" name="colorMode" value="BREATH">
+                Breath
+              </label>
+            </div>
+            <br>
+            <div class="slidecontainer">
+              <input type="range" min="1" max="255" value="64" class="slider" id="myRange">
+            </div>
         </div>
         <script>
             const url = location.hostname;
             const websocketPort = 81;
-            const connection = new WebSocket(`ws://${url}:${websocketPort}`, ['arduino']);    
-
+            const connection = new WebSocket(`ws://${url}:${websocketPort}`, ['arduino']);
             connection.onopen = function () {
               connection.send('Connect ' + new Date());
             };    
-
             connection.onerror = function (error) {
               console.log('WebSocket Error ', error);
             };
@@ -35,17 +53,40 @@
             connection.onclose = function () {
               console.log('WebSocket connection closed');
             };
+            
+            colorMode();
+            brightnessSlider();
+            colerPicker();
 
-            var picker = new KellyColorPicker({
-                place : 'picker',
-                input : 'color',
-                size : 150,
-                userEvents : { 
-                    change : function(self) {
-                        connection.send(self.getCurColorHex());
-                        }  
-                    }
-                });
+            function colerPicker() {
+              var picker = new KellyColorPicker({
+                  place : 'picker',
+                  input : 'color',
+                  size : 150,
+                  userEvents : { 
+                      change : function(self) {
+                          connection.send(self.getCurColorHex());
+                          }  
+                      }
+                  });
+            }    
+            
+            function colorMode() {
+              var radios = document.querySelectorAll('input[type=radio][name="colorMode"]');
+              function colorModeChangeHandler(event) {
+                connection.send("M" + this.value);
+              }
+              Array.prototype.forEach.call(radios, function(radio) {
+                radio.addEventListener('change', colorModeChangeHandler);
+              });
+            }    
+
+            function brightnessSlider() {
+              var slider = document.getElementById("myRange");
+              slider.oninput = function() {
+                connection.send("B" + this.value);
+              }
+            }
         </script>   
     </body>
 </html>

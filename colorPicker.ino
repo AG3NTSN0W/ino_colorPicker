@@ -3,10 +3,8 @@
 #include <WebSocketsServer.h>
 
 #include "FastLED.h"
-#define NUM_LEDS 3
+#define NUM_LEDS 6
 CRGB leds[NUM_LEDS];
-
-int color = 0x008000;
 
 //SSID and Password of your WiFi router
 const char* ssid     = "ssid";
@@ -16,6 +14,37 @@ const char* password = "password";
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
 
+/////////////////////////////////////////////////////
+// COLOR MODE 
+/////////////////////////////////////////////////////
+
+uint32_t currentColor;
+
+enum COLOR_MODE
+    {
+        BREATH,
+        RAINBOW,
+        STATIC
+    };
+
+COLOR_MODE colorMode = COLOR_MODE::STATIC;    
+
+const float maxBrightness = 64.0f;
+const float minBrightness = 0.0f;
+const float brightInterval = 1.0f;
+
+float currentBrightness = maxBrightness;
+
+// BREATH
+enum states
+    {
+        HOLD,
+        DOWN,
+        UP
+    };
+    
+states _state = states::DOWN;
+
 const char MAIN_page[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -24,27 +53,45 @@ const char MAIN_page[] PROGMEM = R"=====(
         <meta charset='UTF-8'>
         <script src='https://rawcdn.githack.com/NC22/HTML5-Color-Picker/fd2cdd0e6ac8843b26e62e2152df091ee9542cb8/html5kellycolorpicker.min.js'></script>
         <style>
-            .button { background-color: #195B6A; border: none; color: white; padding: 16px 40px;text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
-            html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}
-            .colorPicker { padding-top: 20px; }
+            html {font-family:Helvetica;display:inline-block;margin:0px auto;text-align:center;}
+            .colorPicker {position:absolute;top:10%;margin:auto;width:100vw;}
+            .controls {display:flex;align-items:center;justify-content:center;}
+            .radio {flex-direction: column;align-items: center;}
         </style>
-       
     </head>
     <body>  
         <div class='colorPicker'>
             <canvas id='picker'></canvas>
             <br>
             <input id='color' value='#54aedb' name='colorPicker'>
+            <br>
+            <br>
+            <div class="controls">
+              <label class="radio">
+                <input checked type="radio" name="colorMode" value="STATIC">
+                Static
+              </label>
+              <label class="radio">
+                <input type="radio" name="colorMode" value="RAINBOW">
+                Rainbow
+              </label>
+              <label class="radio">
+                <input type="radio" name="colorMode" value="BREATH">
+                Breath
+              </label>
+            </div>
+            <br>
+            <div class="slidecontainer">
+              <input type="range" min="1" max="255" value="64" class="slider" id="myRange">
+            </div>
         </div>
         <script>
             const url = location.hostname;
             const websocketPort = 81;
-            const connection = new WebSocket(`ws://${url}:${websocketPort}`, ['arduino']);    
-
+            const connection = new WebSocket(`ws://${url}:${websocketPort}`, ['arduino']);
             connection.onopen = function () {
               connection.send('Connect ' + new Date());
             };    
-
             connection.onerror = function (error) {
               console.log('WebSocket Error ', error);
             };
@@ -54,17 +101,36 @@ const char MAIN_page[] PROGMEM = R"=====(
             connection.onclose = function () {
               console.log('WebSocket connection closed');
             };
-
-            var picker = new KellyColorPicker({
-                place : 'picker',
-                input : 'color',
-                size : 150,
-                userEvents : { 
-                    change : function(self) {
-                        connection.send(self.getCurColorHex());
-                        }  
-                    }
-                });
+            colorMode();
+            brightnessSlider();
+            colerPicker();
+            function colerPicker() {
+              var picker = new KellyColorPicker({
+                  place : 'picker',
+                  input : 'color',
+                  size : 150,
+                  userEvents : { 
+                      change : function(self) {
+                          connection.send(self.getCurColorHex());
+                          }  
+                      }
+                  });
+            }    
+            function colorMode() {
+              var radios = document.querySelectorAll('input[type=radio][name="colorMode"]');
+              function colorModeChangeHandler(event) {
+                connection.send("M" + this.value);
+              }
+              Array.prototype.forEach.call(radios, function(radio) {
+                radio.addEventListener('change', colorModeChangeHandler);
+              });
+            }    
+            function brightnessSlider() {
+              var slider = document.getElementById("myRange");
+              slider.oninput = function() {
+                connection.send("B" + this.value);
+              }
+            }
         </script>   
     </body>
 </html>
@@ -106,8 +172,12 @@ void HandleClient() {
   server.send(200, "text/html", MAIN_page, sizeof(MAIN_page));
 }
 
-void HandleLED(int r, int g, int b) {
+void HandleLED(uint32_t color) {
+  int r = color >> 16;
+  int g = color >> 8 & 0xFF;
+  int b = color & 0xFF;
   Serial.printf("R: [%i], G: [%i], B: [%i]",r, g, b);
+  
   for(int i = 0; i < NUM_LEDS; i++) {
     leds[i].red = r;
     leds[i].green = g;
@@ -130,17 +200,80 @@ void HandleWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t 
       Serial.println();
       Serial.printf("[%u] get Text: %s\n", num, payload);
       if (payload[0] == '#') {            // we get RGB data
-        uint32_t number = (uint32_t) strtol((const char *) &payload[1], NULL, 16);   // decode rgb data
-        int r = number >> 16;
-        int g = number >> 8 & 0xFF;
-        int b = number & 0xFF;
-        HandleLED(r,g,b);
+        currentColor = (uint32_t) strtol((const char *) &payload[1], NULL, 16);   // decode rgb data
+        HandleLED(currentColor);
+      } else if (payload[0] == 'M'){
+        setMode(payload[1]);
+      } else if (payload[0] == 'B') { 
+        Serial.printf("Brightness: %s\n", payload);
       }
       break;
   }
 }
 
+
+void MODE_breath() {
+    switch (_state) {
+      case states::UP:
+          currentBrightness += brightInterval;
+        break;
+      case states::DOWN:
+          currentBrightness -= brightInterval;
+        break;
+      case states::HOLD:
+          currentBrightness -=  (brightInterval / 10.0f);
+        break;
+      default:
+        break;  
+    }
+
+    if (currentBrightness >= maxBrightness) {
+      _state = states::HOLD;
+    } else if (currentBrightness <= (maxBrightness - 50.0f) && _state == states::HOLD) {
+      _state = states::DOWN;
+    }else if (currentBrightness <= minBrightness) {
+      _state = states::UP;
+    }
+    
+    FastLED.setBrightness( currentBrightness );
+    FastLED.show();
+  }
+
+void MODE_rainbow() {
+    static uint8_t colorIndex = 0;
+    colorIndex = colorIndex + 1; /* motion speed */
+    for( int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = ColorFromPalette( RainbowStripeColors_p, colorIndex, currentBrightness, LINEARBLEND);
+        colorIndex += 3;
+        FastLED.delay(300);
+    }
+    FastLED.show();
+  }  
+
+void setMode(char indicator) {
+  if (indicator == 'B') {
+    colorMode = COLOR_MODE::BREATH;
+    } 
+  else if (indicator == 'R') {
+    colorMode = COLOR_MODE::RAINBOW;
+    }
+  else {
+    colorMode = COLOR_MODE::STATIC;
+    }   
+  }
+
 void loop() {
   webSocket.loop();  
   server.handleClient();
+  switch (colorMode) {
+      case COLOR_MODE::BREATH:
+          MODE_breath();
+        break;
+      case COLOR_MODE::RAINBOW:
+          MODE_rainbow();
+        break;
+      default:
+        break;  
+    }
+  FastLED.delay(100);
 }
